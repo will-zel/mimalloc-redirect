@@ -77,6 +77,7 @@ extern FuncContext* g_redirectContexts[];
 extern TlsEntryFuncPtr g_tlsEntry;
 extern RedirectFuncPtr g_redirect_entry;
 
+void ZY_ToUnicodeString(PUNICODE_STRING pDestinationString, const char* pSource);
 void ZY_AnsiStringToUnicodeString(PUNICODE_STRING pDestinationString, PCANSI_STRING pSourceString);
 void ZY_UnicodeStringToAnsiString(PANSI_STRING pDestinationString, PCUNICODE_STRING pSourceString);
 int ZY_GetEnvironmentVariable(const char* lpName, char* lpBuffer, int nSize);

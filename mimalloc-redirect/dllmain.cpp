@@ -7,7 +7,7 @@
 #include "mimalloc_redirect.h"
 #include <stdint.h>
 
-#define CUR_VER "v1.3.2"
+#define CUR_VER "v1.3.3"
 
 #define ADDCONTEXT0(func1, func2) {#func1, #func2},
 #define ADDCONTEXT1(func1, func2) {#func1, #func2, 0, 0, 0, 0, 0, {{0, &func1}}},
@@ -151,7 +151,7 @@ bool ProcessRedirect(HMODULE hModule)
             bHasPatchNTHeap ? szVal : nullptr);
         if (handle)
         {
-            reinterpret_cast<void*&>(g_redirect_entry) = ZY_GetFuncAddress(handle, "_mi_redirect_entry");
+            g_redirect_entry = static_cast<RedirectFuncPtr>(ZY_GetFuncAddress(handle, "_mi_redirect_entry"));
             if (g_redirect_entry && bLoadOrderOn)
                 ZY_PrioritizeLoadOrder(hModule);
             g_redirectContexts[0] = g_szFuncCtxs;

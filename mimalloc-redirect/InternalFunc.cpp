@@ -8,13 +8,16 @@
 #include <stddef.h>
 
 EXTERN_C NTSTATUS NTAPI RtlQueryEnvironmentVariable(PVOID Environment, PWSTR Name, size_t NameLength, PWSTR Value, size_t ValueLength, PSIZE_T ReturnLength);
-EXTERN_C VOID NTAPI RtlGetNtVersionNumbers(PULONG MajorVersion, PULONG MinorVersion, PULONG BuildNumber);
+//EXTERN_C VOID NTAPI RtlGetNtVersionNumbers(PULONG MajorVersion, PULONG MinorVersion, PULONG BuildNumber);
 EXTERN_C NTSTATUS NTAPI LdrGetDllHandle(PWSTR DllPath, PULONG DllCharacteristics, PUNICODE_STRING DllName, PVOID* DllHandle);
 EXTERN_C NTSTATUS NTAPI LdrEnumerateLoadedModules(BOOLEAN ReservedFlag, PLDR_ENUM_CALLBACK EnumProc, PVOID Context);
 EXTERN_C NTSTATUS NTAPI LdrFindEntryForAddress(PVOID handle, PZYLDR_DATA_TABLE_ENTRY* pEntry);
 EXTERN_C NTSTATUS NTAPI NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, SIZE_T* NumberOfBytesToProtect, ULONG NewAccessProtection, PULONG OldAccessProtection);
 EXTERN_C PPEB NTAPI RtlGetCurrentPeb();
 EXTERN_C ULONG NTAPI RtlGetProcessHeaps(ULONG count, HANDLE* heaps);
+
+typedef VOID (NTAPI *RtlGetNtVersionNumbersFuncPtr)(PULONG MajorVersion, PULONG MinorVersion, PULONG BuildNumber);
+RtlGetNtVersionNumbersFuncPtr g_pRtlGetNtVersionNumbersFunc = nullptr;
 
 #define GLOBAL_BUF_LEN 0x8000
 
@@ -24,6 +27,20 @@ static char g_szBuf[GLOBAL_BUF_LEN + 1];
 static SIZE_T g_nBufLen;
 bool g_bPatchImportsOn = false;
 static int g_nRedirectFlag = 0;
+
+void ZY_ToUnicodeString(PUNICODE_STRING pDestinationString, const char* pSource)
+{
+	ANSI_STRING ansiString = { 0 };
+	ansiString.Buffer = const_cast<char*>(pSource);
+	if (pSource)
+	{
+		int nLen = ZY_StrLen(pSource);
+		ansiString.Length = nLen;
+		ansiString.MaximumLength = nLen + 1;
+	}
+
+	ZY_AnsiStringToUnicodeString(pDestinationString, &ansiString);
+}
 
 void ZY_AnsiStringToUnicodeString(PUNICODE_STRING pDestinationString, PCANSI_STRING pSourceString)
 {
@@ -149,15 +166,13 @@ int ZY_GetEnvironmentVariable(const char* lpName, char* lpBuffer, int nSize)
 		return 0;
 
 	*lpBuffer = 0;
-	ANSI_STRING strAnsi;
-	RtlInitAnsiString(&strAnsi, lpName);
 
 	UNICODE_STRING strUnicode;
 	WCHAR buf[128] = { 0 };
 	strUnicode.Length = 0;
 	strUnicode.MaximumLength = 128;
 	strUnicode.Buffer = buf;
-	ZY_AnsiStringToUnicodeString(&strUnicode, &strAnsi);
+	ZY_ToUnicodeString(&strUnicode, lpName);
 
 	SIZE_T size = 0;
 	WCHAR buf2[MAX_BUF_LEN] = { 0 };
@@ -165,6 +180,7 @@ int ZY_GetEnvironmentVariable(const char* lpName, char* lpBuffer, int nSize)
 		|| size >= nSize || size >= MAX_BUF_LEN)
 		return 0;
 
+	ANSI_STRING strAnsi;
 	strAnsi.Length = 0;
 	strAnsi.MaximumLength = nSize;
 	strAnsi.Buffer = lpBuffer;
@@ -181,7 +197,14 @@ size_t ZY_GetSysVersion(size_t* pMinorVersion, size_t* pBuildNumber)
 	ULONG nMajorVersion = 10;
 	ULONG nMinorVersion = 0;
 	ULONG nBuildNumber = 0;
-	RtlGetNtVersionNumbers(&nMajorVersion, &nMinorVersion, &nBuildNumber);
+	if (!g_pRtlGetNtVersionNumbersFunc)
+	{
+		void* hNtDll = ZY_GetModelHandle("ntdll.dll");
+		if (hNtDll)
+			g_pRtlGetNtVersionNumbersFunc = static_cast<RtlGetNtVersionNumbersFuncPtr>(ZY_GetFuncAddress(hNtDll, "RtlGetNtVersionNumbers"));
+	}
+	if (g_pRtlGetNtVersionNumbersFunc)
+		g_pRtlGetNtVersionNumbersFunc(&nMajorVersion, &nMinorVersion, &nBuildNumber);
 	if (pMinorVersion)
 		*pMinorVersion = nMinorVersion;
 	if (pBuildNumber)
@@ -191,14 +214,12 @@ size_t ZY_GetSysVersion(size_t* pMinorVersion, size_t* pBuildNumber)
 
 void* ZY_GetModelHandle(const char* pModelName)
 {
-	ANSI_STRING strAnsi;
-	RtlInitAnsiString(&strAnsi, pModelName);
 	UNICODE_STRING strUnicode;
 	WCHAR buf[MAX_BUF_LEN] = { 0 };
 	strUnicode.Length = 0;
 	strUnicode.MaximumLength = 260;
 	strUnicode.Buffer = buf;
-	ZY_AnsiStringToUnicodeString(&strUnicode, &strAnsi);
+	ZY_ToUnicodeString(&strUnicode, pModelName);
 	PVOID handle = nullptr;
 	if (NT_SUCCESS(LdrGetDllHandle(nullptr, nullptr, &strUnicode, &handle)))
 		return handle;
@@ -207,9 +228,6 @@ void* ZY_GetModelHandle(const char* pModelName)
 
 void* ZY_GetFuncAddress(void* handle, const char* pFuncName)
 {
-	ANSI_STRING strAnsi;
-	RtlInitAnsiString(&strAnsi, pFuncName);
-
 	ULONG_PTR BasePtr = reinterpret_cast<ULONG_PTR>(handle);
 	PIMAGE_EXPORT_DIRECTORY pExportDir = static_cast<PIMAGE_EXPORT_DIRECTORY>(ZY_GetImageDirectionEntry(handle, IMAGE_DIRECTORY_ENTRY_EXPORT));
 
